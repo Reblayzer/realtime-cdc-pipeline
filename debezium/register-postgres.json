@@ -1,0 +1,50 @@
+{
+  "name": "shop-postgres-connector",
+  "config": {
+    "connector.class": "io.debezium.connector.postgresql.PostgresConnector",
+
+    "//": "─── DB connection ─────────────────────────────────────────────────",
+    "database.hostname": "postgres",
+    "database.port": "5432",
+    "database.user": "cdc_user",
+    "database.password": "cdc_pass",
+    "database.dbname": "shop",
+
+    "//": "─── Topic naming ──────────────────────────────────────────────────",
+    "topic.prefix": "shop",
+    "table.include.list": "public.customers,public.orders,public.order_items",
+
+    "//": "─── CDC plumbing ──────────────────────────────────────────────────",
+    "plugin.name": "pgoutput",
+    "publication.name": "dbz_publication",
+    "publication.autocreate.mode": "filtered",
+    "slot.name": "debezium_slot",
+    "slot.drop.on.stop": "false",
+
+    "//": "─── Snapshot behavior ─────────────────────────────────────────────",
+    "//": "initial = read the current state of the tables first, then stream.",
+    "snapshot.mode": "initial",
+
+    "//": "─── Serialization ─────────────────────────────────────────────────",
+    "//": "JSON with embedded schema disabled, so the Spark job parses a clean payload.",
+    "key.converter": "org.apache.kafka.connect.json.JsonConverter",
+    "key.converter.schemas.enable": "false",
+    "value.converter": "org.apache.kafka.connect.json.JsonConverter",
+    "value.converter.schemas.enable": "false",
+
+    "//": "─── Tombstones for deletes ────────────────────────────────────────",
+    "//": "We keep both the delete event (op=d, before=full row) and the tombstone",
+    "//": "(null value, same key) so downstream consumers can choose semantics.",
+    "tombstones.on.delete": "true",
+
+    "//": "─── Heartbeats ────────────────────────────────────────────────────",
+    "//": "Heartbeat events advance Debezium's stored LSN even when the source",
+    "//": "DB is idle, so the replication slot doesn't pin WAL forever.",
+    "heartbeat.interval.ms": "10000",
+
+    "//": "─── Operational ───────────────────────────────────────────────────",
+    "max.batch.size": "2048",
+    "max.queue.size": "8192",
+    "poll.interval.ms": "500"
+  }
+}
