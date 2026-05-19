@@ -1,0 +1,33 @@
+# Python
+__pycache__/
+*.py[cod]
+*.egg-info/
+.venv/
+venv/
+env/
+.pytest_cache/
+.ipynb_checkpoints/
+
+# Spark / Java
+*.class
+*.jar
+target/
+spark-warehouse/
+metastore_db/
+derby.log
+
+# IDE
+.idea/
+.vscode/
+*.swp
+.DS_Store
+
+# Local state — never commit
+data/
+volumes/
+.env
+*.local
+
+# Build artifacts
+dist/
+build/

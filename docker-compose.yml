@@ -1,0 +1,15 @@
+# Real-time CDC pipeline. Services will be added step-by-step:
+#   Step 2: postgres
+#   Step 3: data-generator
+#   Step 4: zookeeper, kafka, kafka-connect
+#   Step 5: spark-master, spark-worker, spark-job
+#   Step 6: clickhouse
+#   Step 7: jupyter
+#
+# Each service is documented with its role and the key config knobs.
+
+services: {}
+
+networks:
+  default:
+    name: cdc-net
