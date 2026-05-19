@@ -1,14 +1,56 @@
-# Real-time CDC pipeline. Services will be added step-by-step:
-#   Step 2: postgres
+# Real-time CDC pipeline. Services are added step-by-step:
+#   Step 2: postgres                         <-- this commit
 #   Step 3: data-generator
 #   Step 4: zookeeper, kafka, kafka-connect
 #   Step 5: spark-master, spark-worker, spark-job
 #   Step 6: clickhouse
 #   Step 7: jupyter
-#
-# Each service is documented with its role and the key config knobs.
 
-services: {}
+services:
+
+  # ───────────────────────────────────────────────────────────────────────────
+  # Postgres — the system of record. Source of all CDC events.
+  #
+  # Three settings turn this from a normal Postgres into a CDC source:
+  #   - wal_level=logical  → WAL contains row-level changes (not just disk pages)
+  #   - max_wal_senders    → max number of WAL streaming connections
+  #   - max_replication_slots → max number of persistent consumer cursors
+  #
+  # Init scripts in ./postgres/init/*.sql run on first boot (alphabetical order).
+  # They create the schema, seed a few rows, and prepare the publication that
+  # Debezium will subscribe to in Step 4.
+  # ───────────────────────────────────────────────────────────────────────────
+  postgres:
+    image: postgres:16-alpine
+    container_name: cdc-postgres
+    restart: unless-stopped
+    environment:
+      POSTGRES_USER: ${POSTGRES_USER:-cdc_user}
+      POSTGRES_PASSWORD: ${POSTGRES_PASSWORD:-cdc_pass}
+      POSTGRES_DB: ${POSTGRES_DB:-shop}
+    command:
+      - postgres
+      - -c
+      - wal_level=logical
+      - -c
+      - max_wal_senders=10
+      - -c
+      - max_replication_slots=10
+      - -c
+      - max_connections=100
+    ports:
+      - "${POSTGRES_PORT:-5432}:5432"
+    volumes:
+      - postgres-data:/var/lib/postgresql/data
+      - ./postgres/init:/docker-entrypoint-initdb.d:ro
+    healthcheck:
+      test: ["CMD-SHELL", "pg_isready -U ${POSTGRES_USER:-cdc_user} -d ${POSTGRES_DB:-shop}"]
+      interval: 5s
+      timeout: 3s
+      retries: 10
+
+volumes:
+  postgres-data:
 
 networks:
   default:
