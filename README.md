@@ -4,8 +4,6 @@ A production-shaped CDC pipeline that streams every insert, update, and delete f
 
 **Stack:** Postgres → Debezium (Kafka Connect) → Kafka → PySpark Structured Streaming → ClickHouse → Jupyter
 
-Built as the Aladia engineering coding challenge.
-
 ---
 
 ## Architecture
