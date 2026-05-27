@@ -1,0 +1,17 @@
+@tailwind base;
+@tailwind components;
+@tailwind utilities;
+
+html, body, #root { height: 100%; }
+
+body {
+  font-family: 'Inter', system-ui, -apple-system, "Segoe UI", Roboto, sans-serif;
+  -webkit-font-smoothing: antialiased;
+  -moz-osx-font-smoothing: grayscale;
+}
+
+/* Scrollbars consistent with the dark admin theme */
+.scrollbar-ops::-webkit-scrollbar         { width: 8px; height: 8px; }
+.scrollbar-ops::-webkit-scrollbar-track   { background: transparent; }
+.scrollbar-ops::-webkit-scrollbar-thumb   { background: #334155; border-radius: 8px; }
+.scrollbar-ops::-webkit-scrollbar-thumb:hover { background: #475569; }
