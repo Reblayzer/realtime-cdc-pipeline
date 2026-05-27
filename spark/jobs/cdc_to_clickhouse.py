@@ -55,6 +55,10 @@ from pyspark.sql.functions import (
     col, from_json, when, lit, expr, to_timestamp,
     coalesce,
 )
+# Valid Debezium operation codes: create, update, delete, read (snapshot).
+# Truncate ('t') and message ('m') are intentionally not handled — they get
+# routed to the dead-letter table with a descriptive error.
+VALID_OPS = ("c", "u", "d", "r")
 from pyspark.sql.types import StringType
 
 # Local modules — mounted into /opt/job at runtime.
@@ -171,27 +175,28 @@ def parse_batch(raw: DataFrame) -> tuple[DataFrame, DataFrame]:
                   "op:STRING, ts_ms:BIGINT>")
     )
 
-    # Records where parsing failed → DLQ
-    bad_df = (
+    # CASE 1: bytes couldn't be parsed as JSON at all → DLQ
+    bad_envelope_parse = (
         parsed
         .filter(col("env_raw").isNull())
         .select(
             col("value_str").alias("raw_value"),
-            lit("envelope parse failed: not valid Debezium JSON").alias("error_message"),
+            lit("envelope parse failed: not valid JSON").alias("error_message"),
             col("kafka_topic"),
             col("kafka_offset"),
             col("kafka_partition"),
         )
     )
 
-    good_df = (
+    # Everything that envelope-parsed (even if the shape is wrong)
+    enveloped = (
         parsed
         .filter(col("env_raw").isNotNull())
         .select(
+            col("value_str"),                              # kept for DLQ raw_value
             col("env_raw.source.table").alias("table"),
             col("env_raw.op").alias("op"),
             col("env_raw.ts_ms").alias("op_ts_ms"),
-            # Pick the right payload string based on op
             when(col("env_raw.op") == lit("d"),
                  col("env_raw.before"))
             .otherwise(col("env_raw.after"))
@@ -201,8 +206,36 @@ def parse_batch(raw: DataFrame) -> tuple[DataFrame, DataFrame]:
             col("kafka_partition"),
             col("kafka_offset"),
         )
-        # Some events (e.g. heartbeats) have null table or null payload.
-        .filter(col("table").isNotNull() & col("payload").isNotNull())
+    )
+
+    # CASE 2: envelope-parsed but the shape isn't a valid Debezium CDC event
+    # (unknown op, missing table, or missing payload for the op type).
+    # These were previously silently dropped — now they go to the DLQ with a
+    # descriptive error so operators can see what's getting filtered out.
+    envelope_valid = (
+        col("op").isin(*VALID_OPS) &
+        col("table").isNotNull() &
+        col("payload").isNotNull()
+    )
+
+    bad_envelope_shape = (
+        enveloped
+        .filter(~envelope_valid)
+        .select(
+            col("value_str").alias("raw_value"),
+            lit("envelope incomplete: invalid op, missing table, or missing payload").alias("error_message"),
+            col("kafka_topic"),
+            col("kafka_offset"),
+            col("kafka_partition"),
+        )
+    )
+
+    bad_df = bad_envelope_parse.unionByName(bad_envelope_shape)
+
+    good_df = (
+        enveloped
+        .filter(envelope_valid)
+        .drop("value_str")          # don't carry raw bytes downstream
     )
 
     return good_df, bad_df
@@ -242,12 +275,20 @@ def write_batch(batch_df: DataFrame, batch_id: int, spark: SparkSession) -> None
                 "row", from_json(col("payload"), row_schema)
             )
 
-            # If row parsing failed for some records of this table, DLQ them.
+            # Spark's from_json in PERMISSIVE mode (the default) returns a
+            # struct of all-null fields when the input string parses as JSON
+            # but doesn't match the expected shape — *not* a null struct. So
+            # filtering on `col("row").isNull()` alone misses those cases and
+            # a row with id=NULL slips through and crashes the JDBC write.
+            # The defensive check: ALSO treat a null primary key as a failed
+            # parse. `id` is the PK on every table in TABLE_TO_ROW_SCHEMA.
+            row_invalid = col("row").isNull() | col("row.id").isNull()
+
             tbl_bad = (
-                tbl_df.filter(col("row").isNull())
+                tbl_df.filter(row_invalid)
                 .select(
                     col("payload").alias("raw_value"),
-                    lit(f"row parse failed for table {tbl}").alias("error_message"),
+                    lit(f"row parse failed for table {tbl}: null id after parse").alias("error_message"),
                     col("kafka_topic"),
                     col("kafka_offset"),
                     col("kafka_partition"),
@@ -258,7 +299,7 @@ def write_batch(batch_df: DataFrame, batch_id: int, spark: SparkSession) -> None
 
             # Build the warehouse-shaped DataFrame.
             cols = [f"row.{f.name}" for f in row_schema.fields]
-            tbl_good = tbl_df.filter(col("row").isNotNull()).select(
+            tbl_good = tbl_df.filter(~row_invalid).select(
                 *[col(c).alias(c.split(".", 1)[1]) for c in cols],
                 col("op").alias("_op"),
                 col("op_ts_ms").alias("_op_ts_ms"),
