@@ -12,6 +12,7 @@ every 3 seconds without overloading anything.
 from __future__ import annotations
 
 import logging
+import math
 from datetime import datetime, timezone
 
 from fastapi import APIRouter, Query
@@ -34,6 +35,18 @@ STOREFRONT_EMAIL_DOMAINS = ("example.com",)   # data-gen uses fake.email() -> ex
 # user types in. The simpler heuristic: data-gen orders are 'pending' for
 # microseconds before the generator advances them; user orders stay 'pending'.
 # We surface both signals to the frontend so it can decide.
+
+
+def _opt_int(value: float | None) -> int | None:
+    """Coerce a ClickHouse aggregate to an optional int.
+
+    ``quantile()`` over an empty window returns a float NaN (not NULL), so a
+    plain ``int(value)`` raises "cannot convert float NaN to integer" whenever
+    the warehouse has no rows in the lookback window. Treat NaN like missing.
+    """
+    if value is None or math.isnan(value):
+        return None
+    return int(value)
 
 
 @router.get("/health", response_model=HealthMetrics, summary="Pipeline health snapshot")
@@ -74,8 +87,8 @@ def health() -> HealthMetrics:
         clickhouse_orders=ch_orders,
         lag_rows=lag,
         dlq_rows=dlq_rows,
-        latency_p50_ms=int(p50) if p50 is not None else None,
-        latency_p95_ms=int(p95) if p95 is not None else None,
+        latency_p50_ms=_opt_int(p50),
+        latency_p95_ms=_opt_int(p95),
         status=status,
     )
 
